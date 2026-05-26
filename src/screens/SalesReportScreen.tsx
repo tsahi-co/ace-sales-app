@@ -3,7 +3,6 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   ActivityIndicator, Alert, Image, AppState,
 } from 'react-native';
-// Conditionally import DateTimePicker only on native platforms
 import { Platform } from 'react-native';
 let DateTimePicker: any = null;
 if (Platform.OS !== 'web') {
@@ -49,6 +48,12 @@ function getDefaults() {
   return { from, to };
 }
 
+// Returns true only if both from and to are today
+function isToday(from: Date, to: Date): boolean {
+  const today = formatDate(new Date());
+  return formatDate(from) === today && formatDate(to) === today;
+}
+
 export default function SalesReportScreen({ navigation }: any) {
   const { token, selectedBrand } = useAuth();
   if (!selectedBrand) return null;
@@ -71,14 +76,13 @@ export default function SalesReportScreen({ navigation }: any) {
   const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
   const [expandedBrands, setExpandedBrands] = useState<Set<string>>(new Set());
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
+  const [showForecast, setShowForecast] = useState(false);
   const notifId = useRef<string | null>(null);
 
-  // Request notification permission on mount
   useEffect(() => {
     requestNotificationPermission();
   }, []);
 
-  // Track app state
   const appState = useRef(AppState.currentState);
   useEffect(() => {
     const sub = AppState.addEventListener('change', nextState => {
@@ -87,7 +91,6 @@ export default function SalesReportScreen({ navigation }: any) {
     return () => sub.remove();
   }, []);
 
-  // Render by type — grouped by type field
   const renderTypeSection = (skus: SkuSummary[], dayKey: string) => {
     const groups: Record<string, SkuSummary[]> = {};
     skus.forEach(s => { const t = s.type || 'Unknown'; if (!groups[t]) groups[t] = []; groups[t].push(s); });
@@ -167,14 +170,14 @@ export default function SalesReportScreen({ navigation }: any) {
     const fromStr = formatDate(fromDate); const toStr = formatDate(toDate);
     setIsSingleDay(fromStr === toStr);
 
+    // Only show forecast if brand supports it AND selected date is today
+    setShowForecast(brand.hasForecast && isToday(fromDate, toDate));
+
     try {
       const reportT0 = Date.now();
       console.log(`[ACE] ══ Report started: ${fromStr} → ${toStr}`);
-
-      // Start foreground notification so fetch continues in background
       notifId.current = await showFetchingNotification('Fetching orders...');
 
-      // Fetch orders with pagination and live progress
       let allOrders: Order[] = [];
       try {
         allOrders = await fetchAllOrders(token!, fromStr, toStr, brand, (fetched, total) => {
@@ -199,7 +202,6 @@ export default function SalesReportScreen({ navigation }: any) {
       const skuSet = new Set<string>();
       allOrders.forEach(o => (o.items || []).forEach((i: OrderItem) => { if (i.sku) skuSet.add(i.sku); }));
 
-      // Load brand mappings from local JSON + user overrides (no API call needed)
       setLoadingStep('Loading brand mappings...');
       await loadOverrides(brand);
       const unmapped = getUnmappedSkus(Array.from(skuSet));
@@ -219,7 +221,6 @@ export default function SalesReportScreen({ navigation }: any) {
           if (!item.sku) return;
           const skuBrand = getBrandForSku(item.sku, brand);
           const skuType = getTypeForSku(item.sku, brand);
-
           if (!dayMap[d][item.sku]) dayMap[d][item.sku] = { sku: item.sku, brand: skuBrand, type: skuType || 'Unknown', totalQtyInvoiced: 0, totalRevenue: 0, orderCount: 0 };
           dayMap[d][item.sku].totalQtyInvoiced += item.qty_invoiced || 0;
           dayMap[d][item.sku].totalRevenue += (item.price_incl_tax || 0) * (item.qty_invoiced || 0);
@@ -245,7 +246,6 @@ export default function SalesReportScreen({ navigation }: any) {
 
   const fmt = (n: number) => `₪${n.toLocaleString('he-IL', { maximumFractionDigits: 0 })}`;
 
-  // Pagination helpers
   const allSkus = isSingleDay ? (daySummaries[0]?.skus || []) : daySummaries.flatMap(d => d.skus);
   const totalPages = Math.ceil(allSkus.length / PAGE_SIZE);
   const pagedSkus = allSkus.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
@@ -320,7 +320,6 @@ export default function SalesReportScreen({ navigation }: any) {
       {/* Date picker card */}
       <View style={styles.card}>
         <Text style={styles.cardLabel}>DATE RANGE</Text>
-        {/* FROM row */}
         <View style={styles.datePickerRow}>
           <Text style={styles.datePickerLabel}>FROM</Text>
           {isWeb ? (
@@ -341,7 +340,6 @@ export default function SalesReportScreen({ navigation }: any) {
             </>
           )}
         </View>
-        {/* TO row */}
         <View style={styles.datePickerRow}>
           <Text style={styles.datePickerLabel}>TO</Text>
           {isWeb ? (
@@ -380,7 +378,7 @@ export default function SalesReportScreen({ navigation }: any) {
             <View style={styles.summaryItem}>
               <Text style={styles.summaryVal}>{fmt(totalRevenue)}</Text>
               <Text style={styles.summaryLbl}>Revenue</Text>
-              {brand.hasForecast && (() => {
+              {showForecast && (() => {
                 const forecast = getForecastedDaily(totalRevenue);
                 return forecast > 0 && totalRevenue > 0 ? (
                   <Text style={styles.forecastInline}>📈 {fmt(forecast)}</Text>
@@ -431,12 +429,6 @@ export default function SalesReportScreen({ navigation }: any) {
                       </View>
                       <View style={styles.dayRevWrap}>
                         <Text style={styles.dayRev}>{fmt(day.totalRevenue)}</Text>
-            {brand.hasForecast && isSingleDay && (() => {
-              const forecast = getForecastedDaily(day.totalRevenue);
-              return forecast > 0 ? (
-                <Text style={styles.forecastInline}>📈 {fmt(forecast)}</Text>
-              ) : null;
-            })()}
                       </View>
                     </TouchableOpacity>
                     {expanded && (
@@ -481,16 +473,11 @@ export default function SalesReportScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#0a0f1e', padding: 16 },
-
   card: { backgroundColor: '#111827', borderRadius: 16, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#1e2d4a' },
   cardLabel: { fontSize: 10, fontWeight: '700', color: '#334466', letterSpacing: 2, marginBottom: 12 },
-
-  // Header title
   headerTitle: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' },
   headerLogo: { width: 52, height: 22 },
   headerText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-
-  // Dates
   datePickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   datePickerLabel: { fontSize: 11, fontWeight: '700', color: '#445566', letterSpacing: 2, width: 50 },
   datePickerBtn: { flex: 1, backgroundColor: '#0d1526', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#1e2d4a', marginLeft: 12 },
@@ -498,22 +485,17 @@ const styles = StyleSheet.create({
   runBtn: { backgroundColor: '#e8b400', borderRadius: 12, padding: 14, alignItems: 'center', shadowColor: '#e8b400', shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 },
   runBtnText: { color: '#0a0f1e', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
   loadingStep: { textAlign: 'center', color: '#445566', fontSize: 12, marginTop: 8 },
-
-  // Summary
   summaryStrip: { flexDirection: 'row', backgroundColor: '#111827', borderRadius: 14, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#1e2d4a' },
   summaryItem: { flex: 1, alignItems: 'center' },
   summaryVal: { fontSize: 16, fontWeight: '800', color: '#e8b400' },
   summaryLbl: { fontSize: 10, color: '#445566', marginTop: 3, letterSpacing: 1 },
   summaryDivider: { width: 1, backgroundColor: '#1e2d4a' },
-
-  // Toggle
+  forecastInline: { fontSize: 11, color: '#4caf50', marginTop: 2 },
   toggle: { flexDirection: 'row', backgroundColor: '#111827', borderRadius: 12, padding: 4, marginBottom: 14, borderWidth: 1, borderColor: '#1e2d4a' },
   toggleBtn: { flex: 1, padding: 10, borderRadius: 9, alignItems: 'center' },
   toggleOn: { backgroundColor: '#e8b400' },
   toggleTxt: { fontWeight: '700', color: '#445566', fontSize: 13 },
   toggleTxtOn: { color: '#0a0f1e' },
-
-  // Day rows
   dayRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1a2540', justifyContent: 'space-between' },
   dayInfo: { flex: 1 },
   dayDate: { fontSize: 14, fontWeight: '800', color: '#eef2ff' },
@@ -521,10 +503,7 @@ const styles = StyleSheet.create({
   dayRevWrap: { minWidth: 90, alignItems: 'flex-end' },
   dayRev: { fontSize: 14, fontWeight: '700', color: '#e8b400' },
   dayContent: { marginLeft: 18, marginTop: 4, marginBottom: 8 },
-
   chevron: { fontSize: 10, color: '#445566', marginRight: 8, width: 13 },
-
-  // SKU rows
   skuRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#1a2540', justifyContent: 'space-between' },
   skuCode: { flex: 1, fontSize: 13, color: '#ccd6f6', fontWeight: '500' },
   skuRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 },
@@ -535,8 +514,6 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#1a2540' },
   detailLabel: { fontSize: 12, color: '#445566' },
   detailVal: { fontSize: 12, color: '#eef2ff', fontWeight: '600' },
-
-  // Brand rows
   brandRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#1a2540', justifyContent: 'space-between' },
   brandRowInfo: { flex: 1 },
   brandRowName: { fontSize: 14, fontWeight: '800', color: '#eef2ff' },
@@ -545,8 +522,6 @@ const styles = StyleSheet.create({
   brandRowRev: { fontSize: 14, fontWeight: '700', color: '#e8b400' },
   brandExpanded: { backgroundColor: '#0d1526', borderRadius: 8, padding: 10, marginBottom: 8, marginLeft: 18 },
   brandExpandedBox: { backgroundColor: '#0d1526', borderRadius: 8, padding: 10, marginBottom: 8, marginLeft: 18 },
-
-  // Table
   tableHeader: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1e2d4a', marginBottom: 2 },
   tableRow: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#111827' },
   tableRowAlt: { backgroundColor: '#0d1526' },
@@ -556,11 +531,6 @@ const styles = StyleSheet.create({
   th: { fontWeight: '700', color: '#556677', fontSize: 10, letterSpacing: 1 },
   subtotal: { flexDirection: 'row', paddingVertical: 7, marginTop: 4, borderTopWidth: 2, borderTopColor: '#e8b400' },
   subtotalText: { fontWeight: '800', color: '#e8b400' },
-
-  // Forecast
-  forecastInline: { fontSize: 11, color: '#4caf50', marginTop: 2 },
-
-  // Pagination
   pagination: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#1e2d4a' },
   pageBtn: { backgroundColor: '#1a2a40', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
   pageBtnDis: { opacity: 0.3 },

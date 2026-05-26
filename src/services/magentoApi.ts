@@ -16,23 +16,37 @@ const FETCH_TIMEOUT = 60000;
 
 export async function getAdminToken(username: string, password: string, otp: string, brand?: BrandConfig): Promise<string> {
   const BASE_URL = getBaseUrl(brand);
-  // Non-TFA brands use standard admin token endpoint
   const endpoint = brand?.hasTFA === false
     ? `${BASE_URL}/integration/admin/token`
     : `${BASE_URL}/tfa/provider/google/authenticate`;
   const body = brand?.hasTFA === false
     ? { username, password }
     : { username, password, otp };
+
   const res = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+
+  // Read body as text first — works for both plain string tokens and JSON errors
+  const rawText = await res.text();
+
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.message || 'Authentication failed');
+    // Try to parse error as JSON for a nice message, fall back to raw text
+    try {
+      const err = JSON.parse(rawText);
+      throw new Error(err.message || `Login failed (${res.status})`);
+    } catch {
+      throw new Error(rawText || `Login failed (${res.status})`);
+    }
   }
-  return await res.json();
+
+  // Success: Magento returns the token as a quoted JSON string e.g. "abc123"
+  // Strip surrounding quotes if present
+  const token = rawText.trim().replace(/^"|"$/g, '');
+  if (!token) throw new Error('Empty token received from server.');
+  return token;
 }
 
 // ─── Fetch with timeout + retry ────────────────────────────────────────────
@@ -92,12 +106,17 @@ export async function fetchOrdersPage(
   baseUrl?: string,
   onProgress?: (fetched: number, total: number) => void,
 ): Promise<{ orders: Order[]; totalCount: number }> {
+  // Israel is UTC+3; shift window so it aligns with local business day
+  const toNext = new Date(toDate + 'T00:00:00');
+  toNext.setDate(toNext.getDate() + 1);
+  const toNextStr = toNext.toISOString().split('T')[0];
+
   const params = new URLSearchParams({
     'searchCriteria[filter_groups][0][filters][0][field]': 'created_at',
-    'searchCriteria[filter_groups][0][filters][0][value]': `${fromDate} 00:00:00`,
+    'searchCriteria[filter_groups][0][filters][0][value]': `${fromDate} 03:00:00`,
     'searchCriteria[filter_groups][0][filters][0][condition_type]': 'gteq',
     'searchCriteria[filter_groups][1][filters][0][field]': 'created_at',
-    'searchCriteria[filter_groups][1][filters][0][value]': `${toDate} 23:59:59`,
+    'searchCriteria[filter_groups][1][filters][0][value]': `${toNextStr} 02:59:59`,
     'searchCriteria[filter_groups][1][filters][0][condition_type]': 'lteq',
     'searchCriteria[pageSize]': String(pageSize),
     'searchCriteria[currentPage]': String(page),

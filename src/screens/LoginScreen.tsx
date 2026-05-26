@@ -8,6 +8,15 @@ import { safeStorage, isBiometricAvailable, authenticateWithBiometric, isWeb } f
 import { useAuth } from '../context/AuthContext';
 import { getAdminToken } from '../services/magentoApi';
 
+// Web-safe alert: uses browser alert on web, RN Alert on native
+function showAlert(title: string, message: string) {
+  if (isWeb) {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
+
 export default function LoginScreen() {
   const { setToken, selectedBrand, setSelectedBrand } = useAuth();
   if (!selectedBrand) return null;
@@ -20,6 +29,7 @@ export default function LoginScreen() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [savedTokenExists, setSavedTokenExists] = useState(false);
   const [showManualLogin, setShowManualLogin] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => { checkBiometricAndToken(); }, []);
 
@@ -40,18 +50,31 @@ export default function LoginScreen() {
       if (success) {
         const token = savedToken || await safeStorage.getItem(brand.tokenKey);
         if (token) { setToken(token); }
-        else { Alert.alert('Session expired', 'Please login manually.'); setShowManualLogin(true); }
+        else {
+          showAlert('Session expired', 'Please login manually.');
+          setShowManualLogin(true);
+        }
       } else { setShowManualLogin(true); }
     } catch { setShowManualLogin(true); }
   };
 
   const handleLogin = async () => {
-    if (!username || !password || (brand.hasTFA && !otp)) {
-      Alert.alert('Missing fields', brand.hasTFA
-        ? 'Please enter username, password and OTP code.'
-        : 'Please enter username and password.');
+    setErrorMsg('');
+
+    // Validation
+    if (!username || !password) {
+      setErrorMsg('Please enter your username and password.');
       return;
     }
+    if (brand.hasTFA && !otp) {
+      setErrorMsg('Please enter the 6-digit authenticator code.');
+      return;
+    }
+    if (brand.hasTFA && otp.length !== 6) {
+      setErrorMsg('Authenticator code must be 6 digits.');
+      return;
+    }
+
     setLoading(true);
     try {
       const token = await getAdminToken(username, password, otp, brand);
@@ -59,11 +82,11 @@ export default function LoginScreen() {
       setSavedTokenExists(true);
       setToken(token);
     } catch (e: any) {
-      Alert.alert('Login Failed', e.message || 'Please check your credentials.');
+      setErrorMsg(e.message || 'Login failed. Please check your credentials.');
     } finally { setLoading(false); }
   };
 
-  // Biometric screen
+  // Biometric screen (native only)
   if (!isWeb && biometricAvailable && savedTokenExists && !showManualLogin) {
     return (
       <View style={styles.biometricScreen}>
@@ -125,6 +148,13 @@ export default function LoginScreen() {
             </View>
           )}
 
+          {/* Inline error message — works on both web and native */}
+          {errorMsg !== '' && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>⚠️ {errorMsg}</Text>
+            </View>
+          )}
+
           <TouchableOpacity style={[styles.loginBtn, { backgroundColor: brand.primaryColor }]}
             onPress={handleLogin} disabled={loading} activeOpacity={0.85}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.loginBtnText}>Sign In →</Text>}
@@ -166,6 +196,8 @@ const styles = StyleSheet.create({
   otpWrap: { justifyContent: 'center' },
   otpInput: { textAlign: 'center', letterSpacing: 10, fontSize: 22, fontWeight: '700' },
   otpNote: { fontSize: 11, color: '#4a5568', marginTop: 4 },
+  errorBox: { backgroundColor: '#2d1a1a', borderRadius: 10, borderWidth: 1, borderColor: '#5a2a2a', padding: 12 },
+  errorText: { color: '#ff6b6b', fontSize: 13, textAlign: 'center' },
   loginBtn: { borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 8 },
   loginBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '800', letterSpacing: 1 },
   biometricBtn: { alignItems: 'center', padding: 12 },

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(gradlew.bat assembleRelease)",
+      "PowerShell(.\\\\gradlew.bat assembleRelease)",
+      "Bash(cmd /c gradlew.bat assembleRelease)",
+      "Bash(cmd /c \"gradlew.bat assembleRelease 2>&1\")",
+      "Bash(cmd.exe /c \"C:\\\\\\\\Users\\\\\\\\tsahic\\\\\\\\Projects\\\\\\\\AceSalesNew\\\\\\\\android\\\\\\\\gradlew.bat assembleRelease\")"
+    ]
+  }
+}
