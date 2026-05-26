@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "ACE Sales",
+    "slug": "acesales",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0f1e"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0f1e"
+      },
+      "package": "com.tsahico.acesales",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/ace.png",
+      "bundler": "metro",
+      "output": "single-page",
+      "name": "ACE Sales",
+      "shortName": "ACE Sales",
+      "description": "ACE Sales Operations Dashboard",
+      "themeColor": "#0a0f1e",
+      "backgroundColor": "#0a0f1e",
+      "display": "standalone",
+      "orientation": "portrait"
+    },
+    "plugins": [],
+    "extra": {
+      "eas": {
+        "projectId": "795c6bb8-8149-4ac8-924b-e609a1d98e38"
+      }
+    },
+    "owner": "tsahi82c"
+  }
+}
