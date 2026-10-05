@@ -1,4 +1,4 @@
-// GA4 Data API Service - Pure JS RSA-SHA256 JWT signing
+// GA4 Data API Service - Pure JS RSA-SHA256 JWT signing 
 // No external libraries required - works in React Native
 
 import { GA4_SERVICE_ACCOUNT_EMAIL, GA4_SERVICE_ACCOUNT_PRIVATE_KEY } from './ga4Config';
@@ -6,11 +6,6 @@ import { GA4_SERVICE_ACCOUNT_EMAIL, GA4_SERVICE_ACCOUNT_PRIVATE_KEY } from './ga
 const GA4_PROPERTY_ID = '329174817';
 const SERVICE_ACCOUNT_EMAIL = GA4_SERVICE_ACCOUNT_EMAIL;
 const SERVICE_ACCOUNT_PRIVATE_KEY = GA4_SERVICE_ACCOUNT_PRIVATE_KEY;
-
-// If credentials aren't wired (e.g. placeholder in the web build), GA4 is disabled.
-const GA4_ENABLED =
-  SERVICE_ACCOUNT_EMAIL && !SERVICE_ACCOUNT_EMAIL.startsWith('PLACEHOLDER') &&
-  SERVICE_ACCOUNT_PRIVATE_KEY && !SERVICE_ACCOUNT_PRIVATE_KEY.startsWith('PLACEHOLDER');
 
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
@@ -241,12 +236,8 @@ async function runReport(body: object): Promise<any> {
 async function fetchAllSkuRows(dateRange: { startDate: string; endDate: string }): Promise<any> {
   const allRows: any[] = [];
   let offset = 0;
-  const limit = 5000;
-  let totalRows = 0;
-  let page = 0;
+  const limit = 10000;
   while (true) {
-    page++;
-    console.log('[GA4] Fetching SKU page', page, 'offset', offset);
     const report = await runReport({
       dateRanges: [dateRange],
       dimensions: [{ name: 'date' }, { name: 'itemId' }],
@@ -259,20 +250,16 @@ async function fetchAllSkuRows(dateRange: { startDate: string; endDate: string }
       offset,
     });
     const rows = report.rows || [];
-    if (totalRows === 0) totalRows = parseInt(report.rowCount) || 0;
     allRows.push(...rows);
-    console.log('[GA4] Fetched SKU rows:', allRows.length, 'of', totalRows);
-    if (rows.length < limit || allRows.length >= totalRows) break;
+    const rowCount = parseInt(report.rowCount) || parseInt(report.metadata?.rowCount) || 0;
+    console.log('[GA4] Fetched SKU rows:', allRows.length, 'of', rowCount, 'keys:', Object.keys(report).join(','));
+    if (rows.length < limit) break;
     offset += limit;
-    if (page > 10) break; // safety limit
   }
   return { rows: allRows };
 }
 
 export async function fetchGA4Data(fromDate: string, toDate: string): Promise<GA4Summary> {
-  if (!GA4_ENABLED) {
-    return { byDay: [], bySku: [] };
-  }
   const dateRange = { startDate: fromDate, endDate: toDate };
   console.log('[GA4] Fetching date range:', fromDate, '->', toDate);
   const [dayReport, skuReport] = await Promise.all([
@@ -284,15 +271,6 @@ export async function fetchGA4Data(fromDate: string, toDate: string): Promise<GA
         { name: 'ecommercePurchases' }, { name: 'purchaseRevenue' },
         { name: 'bounceRate' }, { name: 'averageSessionDuration' },
       ],
-      metricFilter: {
-        filter: {
-          fieldName: 'itemsViewed',
-          numericFilter: {
-            operation: 'GREATER_THAN',
-            value: { int64Value: '0' },
-          },
-        },
-      },
       orderBys: [{ dimension: { dimensionName: 'date' }, desc: false }],
     }),
     fetchAllSkuRows(dateRange),

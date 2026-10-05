@@ -43,7 +43,8 @@ web-build/
 .expo/
 
 # Secrets — NEVER commit
-src/services/ga4Config.ts
+# src/services/ga4Config.ts
+  src/services/ga4ConfigReal.ts
 *.env
 .dev.vars
 
