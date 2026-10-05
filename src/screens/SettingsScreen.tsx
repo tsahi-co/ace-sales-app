@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, TextInput, ActivityIndicator, Platform,
+  Alert, TextInput, ActivityIndicator,
 } from 'react-native';
 import {
   getEntryForSku, saveOverride, removeOverride,
@@ -10,8 +10,8 @@ import {
 import {
   loadTargets, saveTargets, clearTargets, getTargets, parseTargetsFromText, TargetsMap,
 } from '../services/targetsService';
-import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import { isWeb } from '../utils/platform';
+
 
 export default function SettingsScreen({ navigation }: any) {
   const [overrides, setOverrides] = useState<Record<string, string>>({});
@@ -24,6 +24,7 @@ export default function SettingsScreen({ navigation }: any) {
   const [targets, setTargets] = useState<TargetsMap>({});
   const [targetLoading, setTargetLoading] = useState(false);
   const [targetStatus, setTargetStatus] = useState('');
+  const [csvInput, setCsvInput] = useState('');
 
   useEffect(() => {
     loadData();
@@ -81,31 +82,56 @@ export default function SettingsScreen({ navigation }: any) {
     return '#7799cc';
   };
 
-  const handleUploadTargets = async () => {
+  const handleParseCSV = async () => {
+    if (!csvInput.trim()) {
+      setTargetStatus('Please paste CSV content first.');
+      return;
+    }
+    setTargetLoading(true);
+    setTargetStatus('');
     try {
-      setTargetLoading(true);
-      setTargetStatus('');
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/plain', 'application/vnd.ms-excel',
-               'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '*/*'],
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled) { setTargetLoading(false); return; }
-      const file = result.assets[0];
-      const content = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.UTF8 });
-      const { targets: parsed, count, errors } = parseTargetsFromText(content);
+      const { targets: parsed, count, errors } = parseTargetsFromText(csvInput);
       if (count === 0) {
-        setTargetStatus('No valid targets found. Make sure the file has date and amount columns.');
+        setTargetStatus('No valid targets found. Expected format: date,amount (one per line).');
         setTargetLoading(false);
         return;
       }
       await saveTargets(parsed);
       setTargets(parsed);
-      setTargetStatus(`✅ Loaded ${count} targets successfully!${errors.length > 0 ? ` (${errors.length} rows skipped)` : ''}`);
+      setCsvInput('');
+      setTargetStatus(`Loaded ${count} targets successfully!${errors.length > 0 ? ` (${errors.length} rows skipped)` : ''}`);
     } catch (e: any) {
       setTargetStatus(`Error: ${e.message}`);
     }
     setTargetLoading(false);
+  };
+
+  // Web-only: read a chosen file as text via the browser FileReader
+  const handleWebFileUpload = (event: any) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    setTargetLoading(true);
+    setTargetStatus('');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const text = String(reader.result || '');
+        const { targets: parsed, count, errors } = parseTargetsFromText(text);
+        if (count === 0) {
+          setTargetStatus('No valid targets found. Expected columns: date, amount.');
+          setTargetLoading(false);
+          return;
+        }
+        await saveTargets(parsed);
+        setTargets(parsed);
+        setTargetStatus(`Loaded ${count} targets successfully!${errors.length > 0 ? ` (${errors.length} rows skipped)` : ''}`);
+      } catch (e: any) {
+        setTargetStatus(`Error: ${e.message}`);
+      }
+      setTargetLoading(false);
+    };
+    reader.onerror = () => { setTargetStatus('Could not read file.'); setTargetLoading(false); };
+    reader.readAsText(file);
   };
 
   const handleClearTargets = () => {
@@ -236,10 +262,44 @@ export default function SettingsScreen({ navigation }: any) {
             Supported date formats: DD/MM/YYYY, YYYY-MM-DD, MM/DD/YYYY
           </Text>
 
-          <TouchableOpacity style={styles.uploadBtn} onPress={handleUploadTargets} disabled={targetLoading}>
+          {isWeb && (
+            <View style={{ marginBottom: 14 }}>
+              {/* Native HTML file input — works in the browser */}
+              {React.createElement('input', {
+                type: 'file',
+                accept: '.csv,.txt',
+                onChange: handleWebFileUpload,
+                style: {
+                  color: '#eef2ff', fontSize: 13, padding: '10px',
+                  backgroundColor: '#0d1526', border: '1px solid #1e2d4a',
+                  borderRadius: 8, width: '100%', cursor: 'pointer',
+                },
+              })}
+              <Text style={[styles.cardDesc, { marginTop: 6 }]}>Or paste the content below.</Text>
+            </View>
+          )}
+
+          <Text style={styles.cardDesc}>
+            Paste CSV content below (date,amount per line).{' '}
+            Example: 01/07/2026,450000
+          </Text>
+          <TextInput
+            style={styles.csvInput}
+            value={csvInput}
+            onChangeText={setCsvInput}
+            placeholder={'01/07/2026,450000
+02/07/2026,750000
+...'}
+            placeholderTextColor="#334466"
+            multiline
+            numberOfLines={6}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <TouchableOpacity style={styles.uploadBtn} onPress={handleParseCSV} disabled={targetLoading || !csvInput.trim()}>
             {targetLoading
               ? <ActivityIndicator color="#0a0f1e" />
-              : <Text style={styles.uploadBtnText}>📂 Upload Targets File</Text>}
+              : <Text style={styles.uploadBtnText}>💾 Save Targets</Text>}
           </TouchableOpacity>
 
           {targetStatus !== '' && (
@@ -340,6 +400,7 @@ const styles = StyleSheet.create({
   statItem: { flex: 1, backgroundColor: '#0d1526', borderRadius: 10, padding: 12, alignItems: 'center' },
   statVal: { fontSize: 22, fontWeight: '800', color: '#e8b400' },
   statLbl: { fontSize: 10, color: '#445566', marginTop: 4 },
+  csvInput: { backgroundColor: '#0d1526', borderWidth: 1, borderColor: '#1e2d4a', borderRadius: 10, padding: 12, color: '#eef2ff', fontSize: 12, fontFamily: 'monospace', minHeight: 120, marginBottom: 10, textAlignVertical: 'top' },
   uploadBtn: { backgroundColor: '#e8b400', borderRadius: 10, padding: 14, alignItems: 'center', marginBottom: 4 },
   uploadBtnText: { color: '#0a0f1e', fontWeight: '800', fontSize: 14 },
 });
