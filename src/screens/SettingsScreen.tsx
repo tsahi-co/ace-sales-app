@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, TextInput, ActivityIndicator,
+  Alert, TextInput, ActivityIndicator, Platform,
 } from 'react-native';
 import {
   getEntryForSku, saveOverride, removeOverride,
   getAllOverrides, loadOverrides, BRAND_LABELS as BRANDS, TYPE_LABELS as TYPES, getStaticMap,
 } from '../services/skuBrandService';
+import {
+  loadTargets, saveTargets, clearTargets, getTargets, parseTargetsFromText, TargetsMap,
+} from '../services/targetsService';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 
 export default function SettingsScreen({ navigation }: any) {
   const [overrides, setOverrides] = useState<Record<string, string>>({});
@@ -15,7 +20,10 @@ export default function SettingsScreen({ navigation }: any) {
   const [searchResult, setSearchResult] = useState<string | null>(null);
   const [selectedBrand, setSelectedBrand] = useState('');
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<'lookup' | 'overrides'>('lookup');
+  const [tab, setTab] = useState<'lookup' | 'overrides' | 'targets'>('lookup');
+  const [targets, setTargets] = useState<TargetsMap>({});
+  const [targetLoading, setTargetLoading] = useState(false);
+  const [targetStatus, setTargetStatus] = useState('');
 
   useEffect(() => {
     loadData();
@@ -25,6 +33,8 @@ export default function SettingsScreen({ navigation }: any) {
     await loadOverrides();
     setOverrides(getAllOverrides());
     setStaticMap(getStaticMap());
+    await loadTargets();
+    setTargets(getTargets());
   };
 
   const [selectedType, setSelectedType] = useState('');
@@ -71,6 +81,44 @@ export default function SettingsScreen({ navigation }: any) {
     return '#7799cc';
   };
 
+  const handleUploadTargets = async () => {
+    try {
+      setTargetLoading(true);
+      setTargetStatus('');
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'text/plain', 'application/vnd.ms-excel',
+               'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '*/*'],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) { setTargetLoading(false); return; }
+      const file = result.assets[0];
+      const content = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.UTF8 });
+      const { targets: parsed, count, errors } = parseTargetsFromText(content);
+      if (count === 0) {
+        setTargetStatus('No valid targets found. Make sure the file has date and amount columns.');
+        setTargetLoading(false);
+        return;
+      }
+      await saveTargets(parsed);
+      setTargets(parsed);
+      setTargetStatus(`✅ Loaded ${count} targets successfully!${errors.length > 0 ? ` (${errors.length} rows skipped)` : ''}`);
+    } catch (e: any) {
+      setTargetStatus(`Error: ${e.message}`);
+    }
+    setTargetLoading(false);
+  };
+
+  const handleClearTargets = () => {
+    Alert.alert('Clear Targets', 'Remove all revenue targets?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: async () => {
+        await clearTargets();
+        setTargets({});
+        setTargetStatus('Targets cleared.');
+      }},
+    ]);
+  };
+
   return (
     <ScrollView style={styles.screen} keyboardShouldPersistTaps="handled">
       {/* Tab toggle */}
@@ -81,6 +129,11 @@ export default function SettingsScreen({ navigation }: any) {
         <TouchableOpacity style={[styles.toggleBtn, tab === 'overrides' && styles.toggleOn]} onPress={() => setTab('overrides')}>
           <Text style={[styles.toggleTxt, tab === 'overrides' && styles.toggleTxtOn]}>
             My Overrides {Object.keys(overrides).length > 0 ? `(${Object.keys(overrides).length})` : ''}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.toggleBtn, tab === 'targets' && styles.toggleOn]} onPress={() => setTab('targets')}>
+          <Text style={[styles.toggleTxt, tab === 'targets' && styles.toggleTxtOn]}>
+            Targets {Object.keys(targets).length > 0 ? `(${Object.keys(targets).length})` : ''}
           </Text>
         </TouchableOpacity>
       </View>
@@ -174,6 +227,62 @@ export default function SettingsScreen({ navigation }: any) {
         </View>
       )}
 
+      {/* Targets tab */}
+      {tab === 'targets' && (
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>REVENUE TARGETS</Text>
+          <Text style={styles.cardDesc}>
+            Upload a CSV or Excel file with two columns: date and target amount.{' '}
+            Supported date formats: DD/MM/YYYY, YYYY-MM-DD, MM/DD/YYYY
+          </Text>
+
+          <TouchableOpacity style={styles.uploadBtn} onPress={handleUploadTargets} disabled={targetLoading}>
+            {targetLoading
+              ? <ActivityIndicator color="#0a0f1e" />
+              : <Text style={styles.uploadBtnText}>📂 Upload Targets File</Text>}
+          </TouchableOpacity>
+
+          {targetStatus !== '' && (
+            <Text style={[styles.cardDesc, { marginTop: 10, color: targetStatus.startsWith('✅') ? '#4caf50' : '#ff6b6b' }]}>
+              {targetStatus}
+            </Text>
+          )}
+
+          {Object.keys(targets).length > 0 && (
+            <>
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statVal}>{Object.keys(targets).length}</Text>
+                  <Text style={styles.statLbl}>Days loaded</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statVal}>
+                    {Object.values(targets).reduce((a, b) => a + b, 0).toLocaleString('he-IL', { maximumFractionDigits: 0 })}
+                  </Text>
+                  <Text style={styles.statLbl}>Total target (₪)</Text>
+                </View>
+              </View>
+
+              <Text style={[styles.cardLabel, { marginTop: 14 }]}>LOADED TARGETS</Text>
+              {Object.entries(targets)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([date, amount]) => (
+                  <View key={date} style={styles.overrideRow}>
+                    <Text style={styles.overrideSku}>{date}</Text>
+                    <Text style={[styles.overrideBrand, { color: '#e8b400' }]}>
+                      ₪{amount.toLocaleString()}
+                    </Text>
+                  </View>
+                ))}
+
+              <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#2d1a1a', marginTop: 14 }]} onPress={handleClearTargets}>
+                <Text style={[styles.saveBtnText, { color: '#ff6b6b' }]}>🗑 Clear All Targets</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      )}
+
       {/* Stats */}
       <View style={styles.statsCard}>
         <Text style={styles.cardLabel}>MAPPING STATS</Text>
@@ -231,4 +340,6 @@ const styles = StyleSheet.create({
   statItem: { flex: 1, backgroundColor: '#0d1526', borderRadius: 10, padding: 12, alignItems: 'center' },
   statVal: { fontSize: 22, fontWeight: '800', color: '#e8b400' },
   statLbl: { fontSize: 10, color: '#445566', marginTop: 4 },
+  uploadBtn: { backgroundColor: '#e8b400', borderRadius: 10, padding: 14, alignItems: 'center', marginBottom: 4 },
+  uploadBtnText: { color: '#0a0f1e', fontWeight: '800', fontSize: 14 },
 });

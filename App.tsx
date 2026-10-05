@@ -3,7 +3,7 @@ import { I18nManager, View, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { BrandConfig } from './src/config/brands';
+import { BrandConfig, BRAND_LIST } from './src/config/brands';
 import { AuthContext } from './src/context/AuthContext';
 import BrandSelectScreen from './src/screens/BrandSelectScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -11,7 +11,9 @@ import HomeScreen from './src/screens/HomeScreen';
 import SalesReportScreen from './src/screens/SalesReportScreen';
 import DebugScreen from './src/screens/DebugScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import AnalyticsScreen from './src/screens/AnalyticsScreen';
 import { initNotifications } from './src/services/notificationService';
+import { safeStorage } from './src/utils/platform';
 
 // Fix RTL layout
 if (I18nManager.isRTL) {
@@ -20,6 +22,7 @@ if (I18nManager.isRTL) {
 }
 
 const Stack = createNativeStackNavigator();
+const SELECTED_BRAND_KEY = 'selected_brand_id';
 
 // Error boundary to catch crashes
 class ErrorBoundary extends React.Component<
@@ -49,15 +52,57 @@ class ErrorBoundary extends React.Component<
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
+  const [selectedBrand, setSelectedBrand] = useState<BrandConfig | null>(null);
+  const [isRestoring, setIsRestoring] = useState(true);
 
   useEffect(() => {
     try { initNotifications(); } catch {}
+    restoreSession();
   }, []);
-  const [selectedBrand, setSelectedBrand] = useState<BrandConfig | null>(null);
+
+  // Restore token + brand after fold open / activity recreation
+  const restoreSession = async () => {
+    try {
+      // Restore selected brand
+      const brandId = await safeStorage.getItem(SELECTED_BRAND_KEY);
+      const brand = brandId ? BRAND_LIST.find(b => b.id === brandId) || null : null;
+
+      if (brand) {
+        // Restore token for that brand
+        const savedToken = await safeStorage.getItem(brand.tokenKey);
+        setSelectedBrand(brand);
+        if (savedToken) setToken(savedToken);
+      }
+    } catch {}
+    setIsRestoring(false);
+  };
+
+  // Wrap setSelectedBrand to also persist the brand id
+  const handleSetSelectedBrand = async (brand: BrandConfig | null) => {
+    setSelectedBrand(brand);
+    try {
+      if (brand) {
+        await safeStorage.setItem(SELECTED_BRAND_KEY, brand.id);
+      } else {
+        await safeStorage.deleteItem(SELECTED_BRAND_KEY);
+      }
+    } catch {}
+  };
+
+  // Show nothing while restoring to avoid flicker
+  if (isRestoring) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0a0f1e' }} />
+    );
+  }
 
   return (
     <ErrorBoundary>
-      <AuthContext.Provider value={{ token, setToken, selectedBrand, setSelectedBrand }}>
+      <AuthContext.Provider value={{
+        token, setToken,
+        selectedBrand,
+        setSelectedBrand: handleSetSelectedBrand,
+      }}>
         <StatusBar style="light" backgroundColor="#0a0f1e" />
         <NavigationContainer>
           <Stack.Navigator
@@ -74,7 +119,8 @@ export default function App() {
             ) : (
               <>
                 <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="SalesReport" component={SalesReportScreen} options={{ title: 'Sales by Date' }} />
+                <Stack.Screen name="SalesReport" component={SalesReportScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Analytics" component={AnalyticsScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Debug" component={DebugScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Brand Settings', headerStyle: { backgroundColor: '#0d1526' }, headerTintColor: '#e8b400', headerTitleStyle: { color: '#fff' } }} />
               </>

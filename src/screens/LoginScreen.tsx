@@ -4,7 +4,7 @@ import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
   ScrollView, Image,
 } from 'react-native';
-import { safeStorage, isBiometricAvailable, authenticateWithBiometric, isWeb } from '../utils/platform';
+import { safeStorage, isWeb } from '../utils/platform';
 import { useAuth } from '../context/AuthContext';
 import { getAdminToken } from '../services/magentoApi';
 
@@ -26,36 +26,22 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
-  const [biometricAvailable, setBiometricAvailable] = useState(false);
-  const [savedTokenExists, setSavedTokenExists] = useState(false);
-  const [showManualLogin, setShowManualLogin] = useState(false);
+
   const [errorMsg, setErrorMsg] = useState('');
+  const [savedUsername, setSavedUsername] = useState('');
 
-  useEffect(() => { checkBiometricAndToken(); }, []);
+  useEffect(() => { loadSavedCredentials(); }, []);
 
-  const checkBiometricAndToken = async () => {
+  const loadSavedCredentials = async () => {
     try {
-      const canUseBiometric = await isBiometricAvailable();
-      const savedToken = await safeStorage.getItem(brand.tokenKey);
-      setBiometricAvailable(canUseBiometric);
-      setSavedTokenExists(!!savedToken);
-      if (canUseBiometric && savedToken) { handleBiometricLogin(savedToken); }
-      else { setShowManualLogin(true); }
-    } catch { setShowManualLogin(true); }
-  };
-
-  const handleBiometricLogin = async (savedToken?: string) => {
-    try {
-      const success = await authenticateWithBiometric();
-      if (success) {
-        const token = savedToken || await safeStorage.getItem(brand.tokenKey);
-        if (token) { setToken(token); }
-        else {
-          showAlert('Session expired', 'Please login manually.');
-          setShowManualLogin(true);
-        }
-      } else { setShowManualLogin(true); }
-    } catch { setShowManualLogin(true); }
+      const saved = await safeStorage.getItem(`${brand.tokenKey}_username`);
+      if (saved) {
+        setSavedUsername(saved);
+        setUsername(saved);
+      }
+      const savedPwd = await safeStorage.getItem(`${brand.tokenKey}_password`);
+      if (savedPwd) setPassword(savedPwd);
+    } catch {}
   };
 
   const handleLogin = async () => {
@@ -79,31 +65,13 @@ export default function LoginScreen() {
     try {
       const token = await getAdminToken(username, password, otp, brand);
       await safeStorage.setItem(brand.tokenKey, token);
-      setSavedTokenExists(true);
+      await safeStorage.setItem(`${brand.tokenKey}_username`, username);
+      await safeStorage.setItem(`${brand.tokenKey}_password`, password);
       setToken(token);
     } catch (e: any) {
       setErrorMsg(e.message || 'Login failed. Please check your credentials.');
     } finally { setLoading(false); }
   };
-
-  // Biometric screen (native only)
-  if (!isWeb && biometricAvailable && savedTokenExists && !showManualLogin) {
-    return (
-      <View style={styles.biometricScreen}>
-        <Image source={brand.logo} style={styles.biometricLogo} resizeMode="contain" />
-        <Text style={styles.biometricTitle}>Welcome back</Text>
-        <Text style={styles.biometricHint}>Touch to unlock</Text>
-        <TouchableOpacity style={[styles.fingerprintRing, { borderColor: brand.primaryColor }]} onPress={() => handleBiometricLogin()} activeOpacity={0.8}>
-          <View style={styles.fingerprintInner}>
-            <Text style={styles.fingerprintEmoji}>👆</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setShowManualLogin(true)}>
-          <Text style={[styles.manualLink, { color: brand.primaryColor }]}>Login with password</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.screen}>
@@ -123,7 +91,10 @@ export default function LoginScreen() {
             <View style={styles.inputWrap}>
               <Text style={styles.inputIcon}>👤</Text>
               <TextInput style={styles.input} value={username} onChangeText={setUsername}
-                autoCapitalize="none" placeholder="admin username" placeholderTextColor="#4a5568" />
+                autoCapitalize="none" placeholder="admin username" placeholderTextColor="#4a5568"
+                autoComplete="username"
+                textContentType="username"
+                importantForAutofill="yes" />
             </View>
           </View>
 
@@ -132,7 +103,10 @@ export default function LoginScreen() {
             <View style={styles.inputWrap}>
               <Text style={styles.inputIcon}>🔒</Text>
               <TextInput style={styles.input} value={password} onChangeText={setPassword}
-                secureTextEntry placeholder="••••••••" placeholderTextColor="#4a5568" />
+                secureTextEntry placeholder="••••••••" placeholderTextColor="#4a5568"
+                autoComplete="password"
+                textContentType="password"
+                importantForAutofill="yes" />
             </View>
           </View>
 
@@ -142,7 +116,9 @@ export default function LoginScreen() {
               <View style={[styles.inputWrap, styles.otpWrap]}>
                 <TextInput style={[styles.input, styles.otpInput]} value={otp} onChangeText={setOtp}
                   keyboardType="number-pad" maxLength={6} placeholder="— — — — — —"
-                  placeholderTextColor="#4a5568" />
+                  placeholderTextColor="#4a5568"
+                  autoComplete="one-time-code"
+                  textContentType="oneTimeCode" />
               </View>
               <Text style={styles.otpNote}>⏱ Opens in Google Authenticator · expires every 30s</Text>
             </View>
@@ -160,11 +136,6 @@ export default function LoginScreen() {
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.loginBtnText}>Sign In →</Text>}
           </TouchableOpacity>
 
-          {!isWeb && biometricAvailable && savedTokenExists && (
-            <TouchableOpacity style={styles.biometricBtn} onPress={() => handleBiometricLogin()}>
-              <Text style={[styles.biometricBtnText, { color: brand.primaryColor }]}>👆 Use fingerprint instead</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

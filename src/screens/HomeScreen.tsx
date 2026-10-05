@@ -86,12 +86,13 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.menuCard, styles.menuCardDim]} disabled activeOpacity={1}>
-          <View style={[styles.menuIconWrap, styles.menuIconDim]}><Text style={styles.menuEmoji}>📈</Text></View>
+        <TouchableOpacity style={styles.menuCard} onPress={() => navigation.navigate('Analytics')} activeOpacity={0.85}>
+          <View style={styles.menuIconWrap}><Text style={styles.menuEmoji}>📈</Text></View>
           <View style={styles.menuText}>
-            <Text style={[styles.menuTitle, { color: '#334455' }]}>Analytics</Text>
+            <Text style={styles.menuTitle}>Analytics</Text>
             <Text style={styles.menuDesc}>Trends & comparisons</Text>
           </View>
+          <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
       </View>
 

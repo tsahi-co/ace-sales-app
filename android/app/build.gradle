@@ -41,8 +41,8 @@ android {
         applicationId 'com.tsahico.acesales'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.1.0"
+        versionCode 55
+        versionName "1.2.50"
     }
 
     // ─── APK Output Naming ────────────────────────────────────────────────────

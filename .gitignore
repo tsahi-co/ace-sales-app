@@ -30,3 +30,22 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+# Local Netlify folder
+.netlify
+
+# ─── Add these lines to your existing .gitignore ───
+
+# Build output
+dist/
+web-build/
+
+# Expo
+.expo/
+
+# Secrets — NEVER commit
+src/services/ga4Config.ts
+*.env
+.dev.vars
+
+# Cloudflare
+.wrangler/

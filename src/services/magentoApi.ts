@@ -3,10 +3,14 @@ import { BrandConfig, BRANDS } from '../config/brands';
 
 // Get the correct base URL for a brand
 // On web use Netlify proxy, on native call directly
+// Web base path — the app is served under this path on the server.
+// Empty string = root (Netlify), '/acesales' = IIS sub-path hosting.
+const WEB_BASE_PATH = '';
+
 function getBaseUrl(brand?: BrandConfig): string {
   const b = brand || BRANDS.ace;
   if (Platform.OS === 'web') {
-    return `${b.proxyPrefix}/rest/all/V1`;
+    return `${WEB_BASE_PATH}${b.proxyPrefix}/rest/all/V1`;
   }
   return b.baseUrl;
 }
@@ -86,8 +90,10 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
 
 export interface OrderItem {
   sku: string;
+  name?: string;
   price_incl_tax: number;
   qty_invoiced: number;
+  qty_ordered?: number;
 }
 
 export interface Order {
@@ -105,37 +111,86 @@ export async function fetchOrdersPage(
   pageSize: number,
   baseUrl?: string,
   onProgress?: (fetched: number, total: number) => void,
+  brand?: BrandConfig,
 ): Promise<{ orders: Order[]; totalCount: number }> {
-  // Israel is UTC+3; shift window so it aligns with local business day
-  const toNext = new Date(toDate + 'T00:00:00');
-  toNext.setDate(toNext.getDate() + 1);
-  const toNextStr = toNext.toISOString().split('T')[0];
+  // Urban uses different item field names than ACE/Beitili
+  const isUrban = (baseUrl || '').includes('urban');
+  const isAce = (baseUrl || '').includes('ace');
+  const itemFields = isUrban
+    ? 'sku,name,base_row_total_incl_tax,qty_ordered'
+    : 'sku,name,price_incl_tax,qty_invoiced';
+
+  // Magento stores times in UTC. Israel is UTC+3.
+  // To match what Magento admin shows (Israel local time):
+  // ACE:          from 03:00 UTC same day  → next day 02:59:59 UTC
+  // Urban/Beitili: from 21:00 UTC prev day → next day 20:59:59 UTC
+  // (both equal midnight→midnight Israel time, just different business offsets)
+  const [fy, fm, fd] = fromDate.split('-').map(Number);
+  const [ty, tm, td] = toDate.split('-').map(Number);
+  const fromPrevDate = new Date(Date.UTC(fy, fm - 1, fd - 1));
+  const fromPrevStr = fromPrevDate.toISOString().split('T')[0];
+  const toNextDate = new Date(Date.UTC(ty, tm - 1, td + 1));
+  const toNextStr = toNextDate.toISOString().split('T')[0];
+  const fromValue = isAce ? `${fromDate} 03:00:00` : `${fromPrevStr} 21:00:00`;
+  const toValue = isAce ? `${toNextStr} 02:59:59` : `${toDate} 20:59:59`;
 
   const params = new URLSearchParams({
     'searchCriteria[filter_groups][0][filters][0][field]': 'created_at',
-    'searchCriteria[filter_groups][0][filters][0][value]': `${fromDate} 03:00:00`,
+    'searchCriteria[filter_groups][0][filters][0][value]': fromValue,
     'searchCriteria[filter_groups][0][filters][0][condition_type]': 'gteq',
     'searchCriteria[filter_groups][1][filters][0][field]': 'created_at',
-    'searchCriteria[filter_groups][1][filters][0][value]': `${toNextStr} 02:59:59`,
+    'searchCriteria[filter_groups][1][filters][0][value]': toValue,
     'searchCriteria[filter_groups][1][filters][0][condition_type]': 'lteq',
     'searchCriteria[pageSize]': String(pageSize),
     'searchCriteria[currentPage]': String(page),
-    'fields': 'total_count,items[created_at,base_grand_total,increment_id,items[sku,price_incl_tax,qty_invoiced]]',
+    // Beitili's Magento rejects nested items[items[...]] field restriction, so omit fields for it
+    ...(isAce || isUrban ? {
+      'fields': isUrban
+        ? `total_count,items[created_at,base_grand_total,increment_id,items[${itemFields}]]`
+        : 'total_count,items[created_at,base_grand_total,increment_id,items[sku,name,price_incl_tax,qty_invoiced,qty_ordered,product_option]]',
+    } : {}),
   });
 
+  // Add status filter for brands that require it (Urban, Beitili)
+  if (brand?.statusFilter && brand.statusFilter.length > 0) {
+    params.set('searchCriteria[filter_groups][2][filters][0][field]', 'status');
+    params.set('searchCriteria[filter_groups][2][filters][0][value]', brand.statusFilter.join(','));
+    params.set('searchCriteria[filter_groups][2][filters][0][condition_type]', 'in');
+  }
+
   const url = baseUrl || getBaseUrl();
+  // Magento rejects '+' for spaces in created_at — force %20 encoding
+  const queryString = params.toString().replace(/\+/g, '%20');
   const res = await fetchWithRetry(
-    `${url}/orders?${params.toString()}`,
+    `${url}/orders?${queryString}`,
     { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
   );
 
   if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error('TOKEN_EXPIRED');
+    }
     const err = await res.json();
     throw new Error(err.message || 'Failed to fetch orders');
   }
 
   const data = await res.json();
-  const orders = data.items || [];
+  // Normalize Urban field names to match ACE interface (isUrban already declared above)
+  const orders = (data.items || []).map((order: any) => ({
+    ...order,
+    items: (order.items || []).map((item: any) => ({
+      ...item,
+      price_incl_tax: isUrban
+        ? (item.base_row_total_incl_tax || 0)
+        : (item.price_incl_tax || 0),
+      qty_invoiced: isUrban
+        ? (item.qty_ordered || 0)
+        : (item.qty_invoiced || 0),
+      qty_ordered: isUrban
+        ? (item.qty_ordered || 0)
+        : (item.qty_ordered || item.qty_invoiced || 0),
+    })),
+  }));
   const totalCount = data.total_count || 0;
   if (onProgress) onProgress(orders.length, totalCount);
   return { orders, totalCount };
@@ -160,7 +215,7 @@ export async function fetchAllOrders(
     const pageT0 = Date.now();
     const { orders, totalCount: tc } = await fetchOrdersPage(token, fromDate, toDate, page, PAGE_SIZE, BASE_URL, (fetched, total) => {
       if (onProgress) onProgress(allOrders.length + fetched, total);
-    });
+    }, brand);
     console.log(`[ACE] Page ${page}: got ${orders.length} orders in ${Date.now() - pageT0}ms (${allOrders.length + orders.length}/${tc})`);
     allOrders = [...allOrders, ...orders];
     totalCount = tc;
