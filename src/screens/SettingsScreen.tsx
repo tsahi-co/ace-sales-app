@@ -287,9 +287,7 @@ export default function SettingsScreen({ navigation }: any) {
             style={styles.csvInput}
             value={csvInput}
             onChangeText={setCsvInput}
-            placeholder={'01/07/2026,450000
-02/07/2026,750000
-...'}
+            placeholder={"01/07/2026,450000\n02/07/2026,750000\n..."}
             placeholderTextColor="#334466"
             multiline
             numberOfLines={6}
