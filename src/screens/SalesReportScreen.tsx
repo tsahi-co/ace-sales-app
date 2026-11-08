@@ -825,7 +825,13 @@ export default function SalesReportScreen({ navigation }: any) {
                 </Text>
               )}
             </View>
-            <Text style={s.brandRowRev}>{fmt(rev)}</Text>
+            <View style={s.brandRowRevWrap}>
+              <Text style={s.brandRowRev}>{fmt(rev)}</Text>
+              {showForecast && (() => {
+                const bf = getForecastedDaily(rev);
+                return bf > 0 ? <Text style={s.brandForecast}>📈 {fmt(bf)}</Text> : null;
+              })()}
+            </View>
           </TouchableOpacity>
           {expanded && (
             <View style={s.brandExpanded}>
@@ -1169,6 +1175,7 @@ const s = StyleSheet.create({
   brandRowSub: { fontSize: 11, color: '#445566', marginTop: 2 },
   brandRowRevWrap: { minWidth: 90, alignItems: 'flex-end' },
   brandRowRev: { fontSize: 14, fontWeight: '700', color: '#e8b400' },
+  brandForecast: { fontSize: 11, color: '#4caf50', marginTop: 2, fontWeight: '600' },
   brandExpanded: { backgroundColor: '#0d1526', borderRadius: 8, padding: 10, marginBottom: 8, marginLeft: 18 },
   brandExpandedBox: { backgroundColor: '#0d1526', borderRadius: 8, padding: 10, marginBottom: 8, marginLeft: 18 },
   tableHeader: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1e2d4a', marginBottom: 2 },
