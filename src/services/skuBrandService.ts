@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { BrandConfig } from '../config/brands';
 
 const OVERRIDES_KEY_PREFIX = 'sku_brand_overrides_';
@@ -123,12 +124,17 @@ export async function fetchAndSaveUnmappedSkus(
     const batch = unmapped.slice(i, i + BATCH);
     try {
       const skuList = batch.join(',');
-      const url = `${brand.baseUrl}/products?searchCriteria[filter_groups][0][filters][0][field]=sku&searchCriteria[filter_groups][0][filters][0][value]=${encodeURIComponent(skuList)}&searchCriteria[filter_groups][0][filters][0][condition_type]=in&fields=items[sku,custom_attributes]`;
+      // On web, direct calls to Magento are blocked by CORS — go through the proxy
+      const apiBase = Platform.OS === 'web' ? `${brand.proxyPrefix}/rest/all/V1` : brand.baseUrl;
+      const url = `${apiBase}/products?searchCriteria[filter_groups][0][filters][0][field]=sku&searchCriteria[filter_groups][0][filters][0][value]=${encodeURIComponent(skuList)}&searchCriteria[filter_groups][0][filters][0][condition_type]=in&fields=items[sku,custom_attributes]`;
 
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        console.log('[SKU] Product lookup failed:', res.status);
+        continue;
+      }
 
       const data = await res.json();
       const items = data.items || [];
@@ -162,5 +168,6 @@ export async function fetchAndSaveUnmappedSkus(
     }
   }
 
+  console.log(`[SKU] Auto-mapped ${saved} new SKUs from Magento`);
   return saved;
 }
