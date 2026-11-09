@@ -11,10 +11,11 @@ import {
   loadTargets, saveTargets, clearTargets, getTargets, parseTargetsFromText, TargetsMap,
 } from '../services/targetsService';
 import { isWeb } from '../utils/platform';
+import { confirmAction, notify } from '../utils/confirm';
 
 
 export default function SettingsScreen({ navigation }: any) {
-  const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [overrides, setOverrides] = useState<Record<string, { brand?: string; type?: string }>>({});
   const [staticMap, setStaticMap] = useState<Record<string, string>>({});
   const [searchSku, setSearchSku] = useState('');
   const [searchResult, setSearchResult] = useState<string | null>(null);
@@ -49,7 +50,7 @@ export default function SettingsScreen({ navigation }: any) {
 
   const handleAssign = async () => {
     if (!searchSku.trim() || (!selectedBrand && !selectedType)) {
-      Alert.alert('Missing', 'Please enter a SKU and select at least a brand or type.');
+      notify('Missing', 'Please enter a SKU and select at least a brand or type.');
       return;
     }
     setSaving(true);
@@ -60,19 +61,20 @@ export default function SettingsScreen({ navigation }: any) {
     setOverrides(getAllOverrides());
     if (selectedBrand) setSearchResult(selectedBrand);
     setSaving(false);
-    Alert.alert('Saved', `SKU ${searchSku.trim()} assigned.`);
+    notify('Saved', `SKU ${searchSku.trim()} assigned.`);
   };
 
   const handleRemoveOverride = (sku: string) => {
-    Alert.alert('Remove Override', `Remove brand assignment for SKU "${sku}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove', style: 'destructive', onPress: async () => {
-          await removeOverride(sku);
-          setOverrides(getAllOverrides());
-        }
+    confirmAction({
+      title: 'Remove Override',
+      message: `Remove brand assignment for SKU "${sku}"?`,
+      confirmText: 'Remove',
+      destructive: true,
+      onConfirm: async () => {
+        await removeOverride(sku);
+        setOverrides(getAllOverrides());
       },
-    ]);
+    });
   };
 
   const getBrandColor = (brand: string) => {
@@ -135,14 +137,17 @@ export default function SettingsScreen({ navigation }: any) {
   };
 
   const handleClearTargets = () => {
-    Alert.alert('Clear Targets', 'Remove all revenue targets?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: async () => {
+    confirmAction({
+      title: 'Clear Targets',
+      message: 'Remove all revenue targets?',
+      confirmText: 'Clear',
+      destructive: true,
+      onConfirm: async () => {
         await clearTargets();
         setTargets({});
         setTargetStatus('Targets cleared.');
-      }},
-    ]);
+      },
+    });
   };
 
   return (
@@ -238,17 +243,23 @@ export default function SettingsScreen({ navigation }: any) {
           ) : (
             Object.entries(overrides)
               .sort(([a], [b]) => a.localeCompare(b))
-              .map(([sku, brand]) => (
-                <View key={sku} style={styles.overrideRow}>
-                  <View style={styles.overrideLeft}>
-                    <Text style={styles.overrideSku}>{sku}</Text>
-                    <Text style={[styles.overrideBrand, { color: getBrandColor(brand) }]}>{brand}</Text>
+              .map(([sku, entry]) => {
+                // Each override is { brand?, type? }; tolerate older plain-string values too
+                const e: { brand?: string; type?: string } =
+                  typeof entry === 'string' ? { brand: entry } : (entry || {});
+                const label = [e.brand, e.type].filter(Boolean).join(' · ') || '—';
+                return (
+                  <View key={sku} style={styles.overrideRow}>
+                    <View style={styles.overrideLeft}>
+                      <Text style={styles.overrideSku}>{sku}</Text>
+                      <Text style={[styles.overrideBrand, { color: getBrandColor(e.brand || '') }]}>{label}</Text>
+                    </View>
+                    <TouchableOpacity style={styles.removeBtn} onPress={() => handleRemoveOverride(sku)}>
+                      <Text style={styles.removeBtnText}>✕</Text>
+                    </TouchableOpacity>
                   </View>
-                  <TouchableOpacity style={styles.removeBtn} onPress={() => handleRemoveOverride(sku)}>
-                    <Text style={styles.removeBtnText}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-              ))
+                );
+              })
           )}
         </View>
       )}

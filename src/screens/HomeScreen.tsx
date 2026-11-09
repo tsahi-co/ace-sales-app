@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, StatusBar, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, Image } from 'react-native';
 import { safeStorage } from '../utils/platform';
+import { confirmAction } from '../utils/confirm';
 import { useAuth } from '../context/AuthContext';
 
 
@@ -23,17 +24,31 @@ export default function HomeScreen({ navigation }: any) {
   };
 
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout', onPress: async () => { await safeStorage.deleteItem(brand.tokenKey); setToken(null); } },
-    ]);
+    confirmAction({
+      title: 'Logout',
+      message: 'Are you sure?',
+      confirmText: 'Logout',
+      onConfirm: async () => {
+        await safeStorage.deleteItem(brand.tokenKey);
+        setToken(null);
+      },
+    });
   };
 
   const handleForgetDevice = () => {
-    Alert.alert('Forget this device', 'This will remove saved credentials and require full login next time.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Forget', style: 'destructive', onPress: async () => { await safeStorage.deleteItem(TOKEN_KEY); setToken(null); } },
-    ]);
+    confirmAction({
+      title: 'Forget this device',
+      message: 'This will remove saved credentials and require full login next time.',
+      confirmText: 'Forget',
+      destructive: true,
+      onConfirm: async () => {
+        // Token plus the username/password the login screen auto-saved
+        await safeStorage.deleteItem(brand.tokenKey);
+        await safeStorage.deleteItem(`${brand.tokenKey}_username`);
+        await safeStorage.deleteItem(`${brand.tokenKey}_password`);
+        setToken(null);
+      },
+    });
   };
 
   return (

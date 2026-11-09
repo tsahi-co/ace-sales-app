@@ -555,14 +555,48 @@ export default function SalesReportScreen({ navigation }: any) {
 
   const applySkuFilter = () => {
     const input = skuFilterInput.trim();
-    if (!input) { setSkuFilter(''); setSkuFilterError(''); return; }
-    const exists = allSkusRaw.some((s: SkuSummary) => s.sku === input);
-    if (!exists) {
+    if (!input) { clearSkuFilter(); return; }
+
+    const everySku = daySummaries.flatMap((d: DaySummary) => d.skus);
+    const lower = input.toLowerCase();
+
+    // Exact match (case-insensitive) first, then a single unambiguous partial match
+    let match = everySku.find((x: SkuSummary) => x.sku.toLowerCase() === lower)?.sku;
+    if (!match) {
+      const partial = [...new Set(everySku.filter((x: SkuSummary) => x.sku.toLowerCase().includes(lower)).map((x: SkuSummary) => x.sku))];
+      if (partial.length === 1) {
+        match = partial[0];
+      } else if (partial.length > 1) {
+        setSkuFilterError(`${partial.length} SKUs match "${input}" - enter the full SKU`);
+        return;
+      }
+    }
+    if (!match) {
       setSkuFilterError(`SKU "${input}" not found in results`);
       return;
     }
-    setSkuFilter(input);
+
+    setSkuFilter(match);
+    setSkuFilterInput(match);
     setSkuFilterError('');
+
+    // Go to the By SKU tab and expand the SKU (in multi-day ranges, open each day it appears in)
+    setViewMode('sku');
+    setCurrentPage(1);
+    const openSkus = new Set(expandedSkus);
+    const openDays = new Set(expandedDays);
+    if (isSingleDay) {
+      openSkus.add(match);
+    } else {
+      daySummaries.forEach((d: DaySummary) => {
+        if (d.skus.some((x: SkuSummary) => x.sku === match)) {
+          openSkus.add(`${d.date}-${match}`);
+          openDays.add(d.date);
+        }
+      });
+    }
+    setExpandedSkus(openSkus);
+    setExpandedDays(openDays);
     Keyboard.dismiss();
   };
 
@@ -577,6 +611,7 @@ export default function SalesReportScreen({ navigation }: any) {
     setLoading(true); setHasResults(false); setDaySummaries([]); setAllOrders([]);
     setExpandedDays(new Set()); setExpandedSkus(new Set()); setExpandedBrands(new Set()); setExpandedTypes(new Set());
     setCurrentPage(1);
+    setSkuFilter(''); setSkuFilterInput(''); setSkuFilterError('');
     const fromStr = formatDate(fromDate); const toStr = formatDate(toDate);
     setIsSingleDay(fromStr === toStr);
     setShowForecast(brand.hasForecast && isToday(fromDate, toDate));
@@ -713,7 +748,22 @@ export default function SalesReportScreen({ navigation }: any) {
   }
 
   // ── NARROW: existing layout ───────────────────────────────────────────────
-  const allSkus = daySummaries.flatMap(d => d.skus);
+  const allSkusRaw = daySummaries.flatMap(d => d.skus);
+  const allSkus = skuFilter ? allSkusRaw.filter(sk => sk.sku === skuFilter) : allSkusRaw;
+  // Day list with the active SKU filter applied (day totals recomputed for what is shown)
+  const visibleDays = skuFilter
+    ? daySummaries
+        .map(d => {
+          const skus = d.skus.filter(sk => sk.sku === skuFilter);
+          return {
+            ...d,
+            skus,
+            totalRevenue: skus.reduce((a, x) => a + x.totalRevenue, 0),
+            totalQty: skus.reduce((a, x) => a + x.totalQtyInvoiced, 0),
+          };
+        })
+        .filter(d => d.skus.length > 0)
+    : daySummaries;
   const totalPages = Math.ceil(allSkus.length / PAGE_SIZE);
   const pagedSkus = allSkus.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
@@ -956,6 +1006,8 @@ export default function SalesReportScreen({ navigation }: any) {
                 placeholderTextColor="#445566"
                 autoCapitalize="none"
                 autoCorrect={false}
+                returnKeyType="search"
+                onSubmitEditing={applySkuFilter}
               />
               {skuFilter ? (
                 <TouchableOpacity style={s.skuFilterClear} onPress={clearSkuFilter}>
@@ -1028,7 +1080,7 @@ export default function SalesReportScreen({ navigation }: any) {
                 {viewMode === 'type' && renderTypeSection(allSkus, 'all')}
               </>
             ) : (
-              daySummaries.map(day => {
+              visibleDays.map(day => {
                 const expanded = expandedDays.has(day.date);
                 const daySkus = viewMode === 'sku'
                   ? day.skus.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE) : day.skus;
