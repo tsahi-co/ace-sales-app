@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
-  ScrollView, Image,
+  ScrollView, Image, Linking,
 } from 'react-native';
 import { safeStorage, isWeb } from '../utils/platform';
 import { useAuth } from '../context/AuthContext';
@@ -17,6 +17,48 @@ function showAlert(title: string, message: string) {
   }
 }
 
+// ── Duo Mobile launcher ──────────────────────────────────────────────────────
+const DUO_PACKAGE = 'com.duosecurity.duomobile';
+const DUO_PLAY_URL = `https://play.google.com/store/apps/details?id=${DUO_PACKAGE}`;
+const DUO_APP_STORE_URL = 'https://apps.apple.com/app/duo-mobile/id422663827';
+
+function webUserAgent(): string {
+  return typeof navigator !== 'undefined' ? navigator.userAgent : '';
+}
+
+// On a desktop browser there is no phone app to open, so the button is hidden there.
+function isMobileWeb(): boolean {
+  return isWeb && /iPhone|iPad|iPod|Android/i.test(webUserAgent());
+}
+
+async function openDuoMobile(): Promise<void> {
+  if (Platform.OS === 'android') {
+    // Package-specific launch (cannot open a different app). Google Play starts Duo
+    // if it is installed, otherwise it shows Duo's store page.
+    try {
+      await Linking.openURL(`market://launch?id=${DUO_PACKAGE}`);
+    } catch {
+      await Linking.openURL(DUO_PLAY_URL);
+    }
+    return;
+  }
+  if (Platform.OS === 'ios') {
+    try {
+      await Linking.openURL('duo://');
+    } catch {
+      await Linking.openURL(DUO_APP_STORE_URL);
+    }
+    return;
+  }
+  // Web on a phone (browser or installed PWA)
+  if (/Android/i.test(webUserAgent())) {
+    window.location.href =
+      `intent://#Intent;package=${DUO_PACKAGE};S.browser_fallback_url=${encodeURIComponent(DUO_PLAY_URL)};end`;
+  } else {
+    window.location.href = 'duo://';
+  }
+}
+
 export default function LoginScreen() {
   const { setToken, selectedBrand, setSelectedBrand } = useAuth();
   if (!selectedBrand) return null;
@@ -28,6 +70,15 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState('');
+
+  const handleOpenDuo = async () => {
+    setErrorMsg('');
+    try {
+      await openDuoMobile();
+    } catch {
+      setErrorMsg('Could not open Duo Mobile. Please open it manually.');
+    }
+  };
   const [savedUsername, setSavedUsername] = useState('');
 
   useEffect(() => { loadSavedCredentials(); }, []);
@@ -120,7 +171,13 @@ export default function LoginScreen() {
                   autoComplete="one-time-code"
                   textContentType="oneTimeCode" />
               </View>
-              <Text style={styles.otpNote}>⏱ Opens in Google Authenticator · expires every 30s</Text>
+              {(!isWeb || isMobileWeb()) && (
+                <TouchableOpacity style={[styles.duoBtn, { borderColor: brand.primaryColor }]}
+                  onPress={handleOpenDuo} activeOpacity={0.8}>
+                  <Text style={[styles.duoBtnText, { color: brand.primaryColor }]}>🔐 Open Duo Mobile</Text>
+                </TouchableOpacity>
+              )}
+              <Text style={styles.otpNote}>⏱ Code from your authenticator app · expires every 30s</Text>
             </View>
           )}
 
@@ -167,6 +224,8 @@ const styles = StyleSheet.create({
   otpWrap: { justifyContent: 'center' },
   otpInput: { textAlign: 'center', letterSpacing: 10, fontSize: 22, fontWeight: '700' },
   otpNote: { fontSize: 11, color: '#4a5568', marginTop: 4 },
+  duoBtn: { alignItems: 'center', paddingVertical: 11, borderRadius: 12, borderWidth: 1, marginTop: 8, backgroundColor: '#111827' },
+  duoBtnText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
   errorBox: { backgroundColor: '#2d1a1a', borderRadius: 10, borderWidth: 1, borderColor: '#5a2a2a', padding: 12 },
   errorText: { color: '#ff6b6b', fontSize: 13, textAlign: 'center' },
   loginBtn: { borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 8 },
